@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>正方体展开动画</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: 'Arial', 'Microsoft YaHei', sans-serif;
+      color: white;
+    }
+
+    #canvas {
+      display: block;
+      position: fixed;
+      top: 0; left: 0;
+    }
+
+    /* ── Title ── */
+    #title {
+      position: fixed;
+      top: 18px;
+      width: 100%;
+      text-align: center;
+      font-size: clamp(1.4rem, 3.5vw, 2.4rem);
+      font-weight: bold;
+      color: #FFD700;
+      text-shadow: 2px 2px 8px rgba(0,0,0,0.6);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* ── Hint ── */
+    #hint {
+      position: fixed;
+      top: 70px;
+      width: 100%;
+      text-align: center;
+      font-size: clamp(0.85rem, 2vw, 1.1rem);
+      color: rgba(255,255,255,0.65);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* ── Controls ── */
+    #controls {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      z-index: 10;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 20px;
+    }
+
+    button {
+      padding: 13px 38px;
+      font-size: clamp(1rem, 2.5vw, 1.4rem);
+      font-weight: bold;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+      letter-spacing: 1px;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      filter: brightness(1.1);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    #unfoldBtn {
+      background: linear-gradient(135deg, #FF6B6B, #FF8E53);
+      color: white;
+    }
+
+    #foldBtn {
+      background: linear-gradient(135deg, #4ECDC4, #2BC0B4);
+      color: white;
+    }
+
+    /* ── Speed control ── */
+    #speedControl {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: clamp(0.85rem, 2vw, 1.1rem);
+      background: rgba(255,255,255,0.1);
+      padding: 8px 20px;
+      border-radius: 30px;
+      backdrop-filter: blur(6px);
+    }
+
+    #speedSlider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 160px;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.3);
+      outline: none;
+      cursor: pointer;
+    }
+
+    #speedSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #FFD700;
+      cursor: pointer;
+    }
+
+    #speedSlider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #FFD700;
+      cursor: pointer;
+      border: none;
+    }
+
+    /* ── Step label ── */
+    #stepLabel {
+      position: fixed;
+      bottom: 150px;
+      width: 100%;
+      text-align: center;
+      font-size: clamp(1rem, 2.5vw, 1.3rem);
+      color: rgba(255,255,255,0.85);
+      text-shadow: 1px 1px 4px rgba(0,0,0,0.5);
+      pointer-events: none;
+      z-index: 10;
+      min-height: 1.6em;
+      transition: opacity 0.3s;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="canvas"></canvas>
+
+  <div id="title">🎲 正方体展开动画</div>
+  <div id="hint">🖱️ 拖拽鼠标旋转视角 · 滚轮缩放</div>
+  <div id="stepLabel"></div>
+
+  <div id="controls">
+    <div class="btn-group">
+      <button id="unfoldBtn">📐 展开</button>
+      <button id="foldBtn">🔄 还原</button>
+    </div>
+    <div id="speedControl">
+      <span>速度：</span>
+      <span>慢</span>
+      <input type="range" id="speedSlider" min="0.5" max="4" step="0.5" value="1.5" />
+      <span>快</span>
+    </div>
+  </div>
+
+  <!-- Three.js r134 (global THREE) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <!-- OrbitControls for r134 -->
+  <script src="https://unpkg.com/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // ─────────────────────────────────────────────
+    //  Renderer + Scene + Camera
+    // ─────────────────────────────────────────────
+    const canvas   = document.getElementById('canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(3.2, 2.8, 3.8);
+    camera.lookAt(0, 0, 0);
+
+    // Subtle fog for depth
+    scene.fog = new THREE.FogExp2(0x0f2027, 0.06);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(5, 8, 6);
+    scene.add(dirLight);
+
+    // ─────────────────────────────────────────────
+    //  OrbitControls
+    // ─────────────────────────────────────────────
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping  = true;
+    controls.dampingFactor  = 0.05;
+    controls.minDistance    = 2;
+    controls.maxDistance    = 14;
+    controls.enablePan      = false;
+
+    // ─────────────────────────────────────────────
+    //  Ground grid (decorative)
+    // ─────────────────────────────────────────────
+    const gridHelper = new THREE.GridHelper(10, 10, 0x334455, 0x223344);
+    gridHelper.position.y = -1.2;
+    scene.add(gridHelper);
+
+    // ─────────────────────────────────────────────
+    //  Canvas-texture factory
+    // ─────────────────────────────────────────────
+
+    // Cross-browser rounded rectangle helper
+    // (CanvasRenderingContext2D.roundRect is not available on older browsers)
+    function drawRoundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    function makeFaceTexture(bgColor, label) {
+      const c   = document.createElement('canvas');
+      c.width   = 512;
+      c.height  = 512;
+      const ctx = c.getContext('2d');
+
+      // Rounded-rect background
+      ctx.fillStyle = bgColor;
+      drawRoundRect(ctx, 0, 0, 512, 512, 48);
+      ctx.fill();
+
+      // White inner border
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth   = 14;
+      drawRoundRect(ctx, 12, 12, 488, 488, 40);
+      ctx.stroke();
+
+      // Chinese character
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
+      ctx.shadowBlur  = 18;
+      ctx.fillStyle   = 'white';
+      ctx.font        = 'bold 240px serif';
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 256, 262);
+      ctx.restore();
+
+      return new THREE.CanvasTexture(c);
+    }
+
+    // ─────────────────────────────────────────────
+    //  Face Mesh factory
+    // ─────────────────────────────────────────────
+    function makeFace(bgColor, label) {
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const mat = new THREE.MeshBasicMaterial({
+        map:  makeFaceTexture(bgColor, label),
+        side: THREE.DoubleSide,
+      });
+      return new THREE.Mesh(geo, mat);
+    }
+
+    // ─────────────────────────────────────────────
+    //  Cube assembly using Pivot Groups
+    //
+    //  Cube is 1×1×1, centred at origin.
+    //  Each face sits at ±0.5 along its axis.
+    //
+    //  Pivot groups are placed at the HINGE EDGE
+    //  (the bottom edge of each face when the cube
+    //  is sitting on its bottom face at y = -0.5).
+    //
+    //  Unfolding rotations:
+    //    frontPivot  .rotation.x : 0 → +π/2   (falls toward +z)
+    //    backPivot   .rotation.x : 0 → -π/2   (falls toward -z)
+    //    leftPivot   .rotation.z : 0 → +π/2   (falls toward -x)
+    //    rightPivot  .rotation.z : 0 → -π/2   (falls toward +x)
+    //    topSubPivot .rotation.x : 0 → +π/2   (unfolds beyond front face)
+    //
+    //  Final unfolded positions (all at y = -0.5):
+    //    Bottom → (0, -0.5,  0)
+    //    Front  → (0, -0.5,  1)
+    //    Back   → (0, -0.5, -1)
+    //    Left   → (-1,-0.5,  0)
+    //    Right  → ( 1,-0.5,  0)
+    //    Top    → (0, -0.5,  2)
+    // ─────────────────────────────────────────────
+
+    const cubeGroup = new THREE.Group();
+    scene.add(cubeGroup);
+
+    // ── Bottom (reference, never moves) ──────────
+    const bottomFace = makeFace('#FF6B81', '下');
+    bottomFace.rotation.x = -Math.PI / 2;   // lay horizontal, normal faces +y
+    bottomFace.position.y = -0.5;
+    cubeGroup.add(bottomFace);
+
+    // ── Front ─────────────────────────────────────
+    // Pivot at the bottom edge of the front face: (0, -0.5, 0.5)
+    const frontPivot = new THREE.Group();
+    frontPivot.position.set(0, -0.5, 0.5);
+    cubeGroup.add(frontPivot);
+
+    const frontFace = makeFace('#FF4757', '前');
+    frontFace.position.set(0, 0.5, 0);     // face centre is 0.5 above pivot hinge
+    frontPivot.add(frontFace);
+
+    // ── Top (nested inside frontPivot) ───────────
+    // The top face hinges on the TOP edge of the front face.
+    // In frontPivot local space that edge is at (0, 1, 0).
+    const topSubPivot = new THREE.Group();
+    topSubPivot.position.set(0, 1, 0);     // top edge of front face in frontPivot local
+    frontPivot.add(topSubPivot);
+
+    const topFace = makeFace('#ECCC68', '上');
+    // Place topFace so it forms the cube's top when all rotations = 0.
+    // topSubPivot world pos = (0, 0.5, 0.5).
+    // We need topFace centre at world (0, 0.5, 0).
+    // Offset in topSubPivot local = (0, 0, -0.5).
+    // Rotation.x = -π/2 makes the plane horizontal with normal facing +y (up).
+    topFace.rotation.x = -Math.PI / 2;
+    topFace.position.set(0, 0, -0.5);
+    topSubPivot.add(topFace);
+
+    // ── Back ──────────────────────────────────────
+    const backPivot = new THREE.Group();
+    backPivot.position.set(0, -0.5, -0.5);
+    cubeGroup.add(backPivot);
+
+    const backFace = makeFace('#2ED573', '后');
+    backFace.position.set(0, 0.5, 0);
+    backFace.rotation.y = Math.PI;          // face outward (normal → -z)
+    backPivot.add(backFace);
+
+    // ── Left ──────────────────────────────────────
+    const leftPivot = new THREE.Group();
+    leftPivot.position.set(-0.5, -0.5, 0);
+    cubeGroup.add(leftPivot);
+
+    const leftFace = makeFace('#FFA502', '左');
+    leftFace.position.set(0, 0.5, 0);
+    leftFace.rotation.y = -Math.PI / 2;    // face outward (normal → -x)
+    leftPivot.add(leftFace);
+
+    // ── Right ─────────────────────────────────────
+    const rightPivot = new THREE.Group();
+    rightPivot.position.set(0.5, -0.5, 0);
+    cubeGroup.add(rightPivot);
+
+    const rightFace = makeFace('#5352ED', '右');
+    rightFace.position.set(0, 0.5, 0);
+    rightFace.rotation.y = Math.PI / 2;    // face outward (normal → +x)
+    rightPivot.add(rightFace);
+
+    // ─────────────────────────────────────────────
+    //  Gentle idle rotation for cube state
+    // ─────────────────────────────────────────────
+    let idleRotation = true;
+
+    // ─────────────────────────────────────────────
+    //  Animation state
+    // ─────────────────────────────────────────────
+    let progress      = 0;   // 0 = cube, 1 = unfolded
+    let targetProgress = 0;
+    let animating     = false;
+    let animStartTime = 0;
+    let animStartProg = 0;
+
+    const STEP_LABELS = [
+      '',                                          // 0 – cube
+      '① 前面、后面、左面、右面向外翻转展开…',    // unfolding side faces
+      '② 顶面沿前面边缘继续展开…',               // unfolding top face
+      '✅ 展开完成！这就是正方体的展开图',          // 1 – fully unfolded
+    ];
+
+    const stepLabelEl = document.getElementById('stepLabel');
+    let _lastLabelText = '';
+    let _labelTimer = null;
+    function setStepLabel(text) {
+      if (text === _lastLabelText) return;   // no-op if unchanged
+      _lastLabelText = text;
+      if (_labelTimer) clearTimeout(_labelTimer);
+      stepLabelEl.style.opacity = '0';
+      _labelTimer = setTimeout(() => {
+        stepLabelEl.textContent = text;
+        stepLabelEl.style.opacity = '1';
+        _labelTimer = null;
+      }, 300);
+    }
+
+    // ─────────────────────────────────────────────
+    //  Easing
+    // ─────────────────────────────────────────────
+    function easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    // ─────────────────────────────────────────────
+    //  Apply pivot rotations for progress t ∈ [0,1]
+    //
+    //  Phase 1  t ∈ [0, 0.68]: side faces unfold
+    //  Phase 2  t ∈ [0.60, 1]: top face unfolds
+    //    (phases overlap slightly for a natural flow)
+    // ─────────────────────────────────────────────
+    function applyProgress(t) {
+      const P1_END   = 0.68;
+      const P2_START = 0.60;
+
+      // Phase 1
+      const t1   = clamp(t / P1_END, 0, 1);
+      const e1   = easeInOutCubic(t1);
+
+      frontPivot.rotation.x =  e1 * (Math.PI / 2);
+      backPivot.rotation.x  = -e1 * (Math.PI / 2);
+      leftPivot.rotation.z  =  e1 * (Math.PI / 2);
+      rightPivot.rotation.z = -e1 * (Math.PI / 2);
+
+      // Phase 2
+      const t2   = clamp((t - P2_START) / (1 - P2_START), 0, 1);
+      const e2   = easeInOutCubic(t2);
+
+      topSubPivot.rotation.x = e2 * (Math.PI / 2);
+
+      // Step label hints
+      if (t <= 0) {
+        setStepLabel('');
+      } else if (t < P2_START) {
+        setStepLabel(STEP_LABELS[1]);
+      } else if (t < 1) {
+        setStepLabel(STEP_LABELS[2]);
+      } else {
+        setStepLabel(STEP_LABELS[3]);
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    //  Trigger animation
+    // ─────────────────────────────────────────────
+    const unfoldBtn = document.getElementById('unfoldBtn');
+    const foldBtn   = document.getElementById('foldBtn');
+    const speedSlider = document.getElementById('speedSlider');
+
+    function startAnim(target) {
+      targetProgress = target;
+      animStartProg  = progress;
+      animStartTime  = performance.now();
+      animating      = true;
+      idleRotation   = false;
+      unfoldBtn.disabled = true;
+      foldBtn.disabled   = true;
+    }
+
+    unfoldBtn.addEventListener('click', () => {
+      if (animating) return;
+      if (progress === 1) {
+        unfoldBtn.style.transform = 'translateX(-4px)';
+        setTimeout(() => { unfoldBtn.style.transform = ''; }, 150);
+        return;
+      }
+      startAnim(1);
+    });
+
+    foldBtn.addEventListener('click', () => {
+      if (animating) return;
+      if (progress === 0) {
+        // Already folded – briefly shake the button as feedback
+        foldBtn.style.transform = 'translateX(-4px)';
+        setTimeout(() => { foldBtn.style.transform = ''; }, 150);
+        return;
+      }
+      startAnim(0);
+    });
+
+    // ─────────────────────────────────────────────
+    //  Resize handler
+    // ─────────────────────────────────────────────
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ─────────────────────────────────────────────
+    //  Render loop
+    // ─────────────────────────────────────────────
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = clock.getDelta();
+
+      // Idle slow rotation when cube is fully assembled
+      if (idleRotation && progress === 0) {
+        cubeGroup.rotation.y += delta * 0.4;
+      }
+
+      // Advance animation
+      if (animating) {
+        const elapsed    = (performance.now() - animStartTime) / 1000;
+        const speed      = parseFloat(speedSlider.value);
+        // Duration scales inversely with speed; base = 2.8 s
+        const duration   = 2.8 / speed;
+        const rawT       = clamp(elapsed / duration, 0, 1);
+        const direction  = targetProgress > animStartProg ? 1 : -1;
+        const span       = Math.abs(targetProgress - animStartProg);
+
+        progress = animStartProg + direction * span * rawT;
+        progress = clamp(progress, 0, 1);
+
+        applyProgress(progress);
+
+        if (rawT >= 1) {
+          animating = false;
+          progress  = targetProgress;
+          applyProgress(progress);
+          unfoldBtn.disabled = false;
+          foldBtn.disabled   = false;
+          // Re-enable idle only when back to cube
+          if (progress === 0) {
+            idleRotation = true;
+            cubeGroup.rotation.y = 0;
+          }
+        }
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // Slight initial pause then gentle auto-show
+    // (user can click buttons; no forced autoplay)
+    setStepLabel('点击"展开"按钮，观看正方体如何展开成平面图！');
+
+  })();
+  </script>
+</body>
+</html>
